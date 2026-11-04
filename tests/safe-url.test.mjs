@@ -20,3 +20,23 @@ test('returns verified public address', async () => {
   const value = await new Promise((resolve,reject) => lookup('example.org', {}, (e, ip, family) => e?reject(e):resolve([ip,family])));
   assert.deepEqual(value, ['8.8.8.8',4]);
 });
+
+test('rejects public IPv6 DNS destination', async () => {
+  const lookup = publicDnsLookup(async () => [{address:'2606:4700:4700::1111',family:6}]);
+  const err = await new Promise(resolve => lookup('example.org', {}, e => resolve(e)));
+  assert.match(err.message, /Unsafe DNS/);
+});
+test('rejects mixed public/private DNS records', async () => {
+  const lookup = publicDnsLookup(async () => [{address:'8.8.8.8',family:4},{address:'10.0.0.1',family:4}]);
+  const err = await new Promise(resolve => lookup('example.org', {}, e => resolve(e)));
+  assert.match(err.message, /Unsafe DNS/);
+});
+test('rejects DNS rebinding between successive socket lookups', async () => {
+  let count=0;
+  const lookup = publicDnsLookup(async () => ++count === 1 ? [{address:'8.8.8.8',family:4}] : [{address:'127.0.0.1',family:4}]);
+  const first = await new Promise(resolve => lookup('example.org', {}, (e,ip) => resolve({e,ip})));
+  assert.equal(first.e,null);
+  assert.equal(first.ip,'8.8.8.8');
+  const second = await new Promise(resolve => lookup('example.org', {}, e => resolve(e)));
+  assert.match(second.message, /Unsafe DNS/);
+});

@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import axios from "axios";
+import https from "node:https";
+import { validateTarget, publicDnsLookup } from "../../../lib/safe-url.mjs";
 import * as cheerio from "cheerio";
 import { createClient } from "@supabase/supabase-js";
 
@@ -14,15 +16,15 @@ export async function POST(req: Request) {
   try {
     const { url } = await req.json();
 
-    if (!url || !url.startsWith("http")) {
-      return Response.json({ error: "Invalid URL" }, { status: 400 });
-    }
+    let approvedUrl: string;
+    try { approvedUrl = validateTarget(url).toString(); }
+    catch { return Response.json({ error: "Only public HTTPS URLs are allowed" }, { status: 400 }); }
 
     // 🔄 Check cache — if URL already analyzed, return existing result
     const { data: cached } = await supabase
       .from("projects")
       .select("*")
-      .eq("url", url)
+      .eq("url", approvedUrl)
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
@@ -32,10 +34,19 @@ export async function POST(req: Request) {
     }
 
     // 1. Load website
-    const { data } = await axios.get(url, {
+    const { data, headers } = await axios.get(approvedUrl, {
       timeout: 8000,
-      headers: { "User-Agent": "Mozilla/5.0" },
+      httpsAgent: new https.Agent({ lookup: publicDnsLookup() }),
+      proxy: false,
+      maxRedirects: 0,
+      maxContentLength: 150_000,
+      responseType: "text",
+      decompress: false,
+      headers: { "User-Agent": "ScamRadar/0.3", Accept: "text/html", "Accept-Encoding": "identity" },
     });
+    if (!/^text\/html(?:;|$)|^application\/xhtml\+xml(?:;|$)/i.test(String(headers["content-type"] || ""))) {
+      return Response.json({ error: "Only HTML pages supported" }, { status: 415 });
+    }
 
     // 2. Parse text
     const $ = cheerio.load(data);
@@ -63,7 +74,7 @@ export async function POST(req: Request) {
 
     // 4. Save to Supabase
     await supabase.from("projects").insert([{
-      url,
+      url: approvedUrl,
       score: result.score,
       verdict: result.verdict,
       issues: result.issues,

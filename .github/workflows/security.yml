@@ -1,0 +1,25 @@
+name: ScamRadar Security
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  security-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: SSRF regression tests
+        run: node --test tests/*.test.mjs
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build
+        run: npm run build
+        env:
+          OPENAI_API_KEY: ci-placeholder-not-a-real-secret
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-real-secret
